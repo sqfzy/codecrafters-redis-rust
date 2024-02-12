@@ -13,7 +13,7 @@ fn main() {
         match stream {
             Ok(mut stream) => {
                 println!("accepted new connection");
-                stream.write_all(b"+PONG/r/n").unwrap();
+                stream.write_all("+PONG/r/n".as_bytes()).unwrap();
                 stream.flush().unwrap();
             }
             Err(e) => {
