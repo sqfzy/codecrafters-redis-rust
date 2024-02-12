@@ -18,7 +18,7 @@ fn main() {
         match stream {
             Ok(mut stream) => {
                 println!("accepted new connection");
-                loop {
+                std::thread::spawn(move || loop {
                     let mut buf = [0u8; 64];
                     match stream.read(&mut buf) {
                         Ok(_n) => {
@@ -31,7 +31,7 @@ fn main() {
                             break;
                         }
                     }
-                }
+                });
             }
             Err(e) => {
                 println!("error: {}", e);
