@@ -1,4 +1,8 @@
-use crate::{db::DbManipulate, error::RedisResult, Frame};
+use crate::{
+    db::DbManipulate,
+    error::{RedisError, RedisResult},
+    Frame,
+};
 use async_trait::async_trait;
 use bytes::Bytes;
 use std::time::Duration;
@@ -73,5 +77,83 @@ impl CmdExecutor for Set {
         )
         .await;
         Ok(Frame::Simple("OK".to_string()))
+    }
+}
+
+pub struct Info {
+    pub sections: Section,
+}
+
+pub enum Section {
+    Array(Vec<Section>),
+    // all: Return all sections (excluding module generated ones)
+    All,
+    // default: Return only the default set of sections
+    Default,
+    // everything: Includes all and modules
+    Everything,
+    // server: General information about the Redis server
+    Server,
+    // clients: Client connections section
+    Clients,
+    // memory: Memory consumption related information
+    Memory,
+    // persistence: RDB and AOF related information
+    Persistence,
+    // stats: General statistics
+    Stats,
+    // replication: Master/replica replication information
+    Replication,
+    // cpu: CPU consumption statistics
+    Cpu,
+    // commandstats: Redis command statistics
+    CommandStats,
+    // latencystats: Redis command latency percentile distribution statistics
+    LatencyStats,
+    // sentinel: Redis Sentinel section (only applicable to Sentinel instances)
+    Sentinel,
+    // cluster: Redis Cluster section
+    Cluster,
+    // modules: Modules section
+    Modules,
+    // keyspace: Database related statistics
+    Keyspace,
+    // errorstats: Redis error statistics
+    ErrorStats,
+}
+impl TryFrom<Bytes> for Section {
+    type Error = RedisError;
+
+    fn try_from(value: Bytes) -> Result<Self, Self::Error> {
+        let value = value.to_ascii_lowercase();
+        match value.as_slice() {
+            b"replication" => Ok(Section::Replication),
+            // TODO:
+            _ => Err(RedisError::SyntaxErr),
+        }
+    }
+}
+impl TryFrom<Vec<Bytes>> for Section {
+    type Error = RedisError;
+
+    fn try_from(value: Vec<Bytes>) -> Result<Self, Self::Error> {
+        let mut sections = Vec::with_capacity(value.len());
+        for section in value {
+            sections.push(section.try_into()?);
+        }
+        Ok(Section::Array(sections))
+    }
+}
+
+#[async_trait]
+impl CmdExecutor for Info {
+    async fn execute(&mut self, db: &mut dyn DbManipulate) -> RedisResult<Frame> {
+        match self.sections {
+            Section::Replication => Ok(Frame::Bulk(Bytes::from_static(
+                b"# Replication\r\nrole:master\r\n",
+            ))),
+            // TODO:
+            _ => Err(RedisError::InComplete),
+        }
     }
 }

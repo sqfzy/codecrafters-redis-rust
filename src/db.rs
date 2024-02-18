@@ -41,7 +41,7 @@ pub struct Entry {
 #[async_trait]
 impl DbManipulate for Db {
     async fn get(&self, key: Bytes) -> Option<Bytes> {
-        assert!(key.len() > 0, "key must not be empty");
+        assert!(!key.is_empty(), "key must not be empty");
 
         let mut inner = self.inner.lock().await;
         if let Some(value) = inner.entries.get(&key) {
@@ -59,14 +59,14 @@ impl DbManipulate for Db {
     }
 
     async fn set(&mut self, key: Bytes, value: Bytes, expire: Option<Duration>, keepttl: bool) {
-        assert!(key.len() > 0, "key must not be empty");
-        assert!(value.len() > 0, "value must not be empty");
+        assert!(!key.is_empty(), "key must not be empty");
+        assert!(!value.is_empty(), "value must not be empty");
         assert!(
             expire.is_none() || expire.unwrap().as_secs() > 0,
             "expire must be positive"
         );
         assert!(
-            !expire.is_none() || !keepttl,
+            expire.is_some() || !keepttl,
             "expire and keepttl can't be both None"
         );
 

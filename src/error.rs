@@ -8,4 +8,6 @@ pub enum RedisError {
     SyntaxErr,
     #[error("End of Stream")]
     EndofStream,
+    #[error("Incomplete")]
+    InComplete,
 }

@@ -10,6 +10,7 @@ use crate::{
     frame::Frame,
     stream::FrameHandler,
 };
+use clap::Parser;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
@@ -22,12 +23,21 @@ fn init() {
     tracing_subscriber::fmt::init();
 }
 
+#[derive(Parser)]
+struct Cli {
+    #[clap(short, long, default_value = "6379")]
+    port: u16,
+}
+
 #[tokio::main]
 async fn main() {
-    // client_test().await;
+    // client_test("*2\r\n$4\r\ninfo\r\n$11\r\nreplication\r\n").await;
+    // return;
     init();
 
-    let listener = TcpListener::bind("127.0.0.1:6379")
+    let cli = Cli::parse();
+
+    let listener = TcpListener::bind(format!("localhost:{}", cli.port))
         .await
         .expect("Fail to connect");
 
@@ -58,6 +68,7 @@ async fn main() {
 
 async fn handle(mut stream: TcpStream, mut db: Db) -> RedisResult<()> {
     // server_test(&mut stream).await;
+    // return Ok(());
 
     loop {
         let frames = stream.read_frame().await?;
@@ -67,12 +78,9 @@ async fn handle(mut stream: TcpStream, mut db: Db) -> RedisResult<()> {
     }
 }
 
-async fn client_test() {
+async fn client_test(cmd: &'static str) {
     let mut stream = TcpStream::connect("127.0.0.1:6379").await.unwrap();
-    stream
-        .write_all(b"*2\r\n$7\r\nCOMMAND\r\n$4\r\nDOCS\r\n")
-        .await
-        .unwrap();
+    stream.write_all(cmd.as_bytes()).await.unwrap();
     let mut buf = [0u8; 1024];
     let n = stream.read(&mut buf).await.unwrap();
     println!("{:?}", String::from_utf8(buf[0..n].to_vec()).unwrap());

@@ -1,12 +1,9 @@
 use std::time::Duration;
 
 use crate::{
-    cmd,
-    cmd::CmdExecutor,
+    cmd::{self, CmdExecutor, Section},
     error::{RedisError, RedisResult},
 };
-use anyhow::Context;
-use async_trait::async_trait;
 use bytes::Bytes;
 use tracing::{debug, info};
 
@@ -131,6 +128,27 @@ impl Frame {
                             _ => {}
                         }
                     }
+                }
+            }
+            b"info" => {
+                debug!("parsing to Info");
+
+                if len == 1 {
+                    return Ok(Box::new(cmd::Info {
+                        sections: Section::Default,
+                    }));
+                }
+                if len == 2 {
+                    let section = bulks[1].clone();
+                    return Ok(Box::new(cmd::Info {
+                        sections: section.try_into()?,
+                    }));
+                }
+                if len > 2 && len <= 14 {
+                    let sections = bulks[1..].to_vec();
+                    return Ok(Box::new(cmd::Info {
+                        sections: sections.try_into()?,
+                    }));
                 }
             }
             _ => {}
