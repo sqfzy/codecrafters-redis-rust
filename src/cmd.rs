@@ -1,10 +1,10 @@
 use crate::{
     db::DbManipulate,
     error::{RedisError, RedisResult},
-    Frame,
+    Frame, CONFIG,
 };
 use async_trait::async_trait;
-use bytes::Bytes;
+use bytes::{BufMut, Bytes, BytesMut};
 use std::time::Duration;
 
 #[async_trait]
@@ -149,9 +149,20 @@ impl TryFrom<Vec<Bytes>> for Section {
 impl CmdExecutor for Info {
     async fn execute(&mut self, db: &mut dyn DbManipulate) -> RedisResult<Frame> {
         match self.sections {
-            Section::Replication => Ok(Frame::Bulk(Bytes::from_static(
-                b"# Replication\r\nrole:master\r\n",
-            ))),
+            Section::Replication => {
+                let res = if CONFIG.replicaof.is_none() {
+                    format!(
+                        "role:master\r\nmaster_replid:{}\r\nmaster_repl_offset:{}\r\n",
+                        CONFIG.replid, CONFIG.repl_offset
+                    )
+                } else {
+                    format!(
+                        "role:slave\r\nmaster_replid:{}\r\nmaster_repl_offset:{}\r\n",
+                        CONFIG.replid, CONFIG.repl_offset
+                    )
+                };
+                Ok(Frame::Bulk(res.into()))
+            }
             // TODO:
             _ => Err(RedisError::InComplete),
         }

@@ -8,11 +8,13 @@ use tokio::{
     net::TcpStream,
 };
 
+#[async_trait::async_trait]
 pub trait FrameHandler {
     async fn read_frame(&mut self) -> RedisResult<Frame>;
     async fn write_frame(&mut self, frame: Frame) -> RedisResult<()>;
 }
 
+#[async_trait::async_trait]
 impl FrameHandler for TcpStream {
     async fn read_frame(&mut self) -> RedisResult<Frame> {
         let len = get_len(self, b'*').await? as usize;

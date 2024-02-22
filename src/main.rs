@@ -1,8 +1,12 @@
+mod cli;
 mod cmd;
+mod config;
 mod db;
 mod error;
 mod frame;
 mod stream;
+
+use std::sync::Arc;
 
 use crate::{
     db::Db,
@@ -10,11 +14,13 @@ use crate::{
     frame::Frame,
     stream::FrameHandler,
 };
-use clap::Parser;
+use once_cell::sync::Lazy;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
 };
+
+static CONFIG: Lazy<Arc<config::RedisConfig>> = Lazy::new(|| Arc::new(config::RedisConfig::new()));
 
 fn init() {
     if std::env::var("RUST_LOG").is_err() {
@@ -23,21 +29,13 @@ fn init() {
     tracing_subscriber::fmt::init();
 }
 
-#[derive(Parser)]
-struct Cli {
-    #[clap(short, long, default_value = "6379")]
-    port: u16,
-}
-
 #[tokio::main]
 async fn main() {
     // client_test("*2\r\n$4\r\ninfo\r\n$11\r\nreplication\r\n").await;
     // return;
     init();
 
-    let cli = Cli::parse();
-
-    let listener = TcpListener::bind(format!("localhost:{}", cli.port))
+    let listener = TcpListener::bind(format!("localhost:{}", CONFIG.port))
         .await
         .expect("Fail to connect");
 
