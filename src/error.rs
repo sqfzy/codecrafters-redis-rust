@@ -10,4 +10,6 @@ pub enum RedisError {
     EndofStream,
     #[error("Incomplete")]
     InComplete,
+    #[error("Error: {0}")]
+    Other(String)
 }

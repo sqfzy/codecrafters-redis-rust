@@ -1,25 +1,12 @@
+use super::CmdExecutor;
 use crate::{
     db::DbManipulate,
     error::{RedisError, RedisResult},
     Frame, CONFIG,
 };
 use async_trait::async_trait;
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::Bytes;
 use std::time::Duration;
-
-#[async_trait]
-pub trait CmdExecutor: Send {
-    async fn execute(&mut self, db: &mut dyn DbManipulate) -> RedisResult<Frame>;
-}
-
-// *2\r\n$7\r\nCOMMAND\r\n$4\r\nDOCS\r\n
-pub struct Command;
-#[async_trait]
-impl CmdExecutor for Command {
-    async fn execute(&mut self, _db: &mut dyn DbManipulate) -> RedisResult<Frame> {
-        Ok(Frame::Array(vec![]))
-    }
-}
 
 // *1\r\n$4\r\nping\r\n
 // return: +PONG\r\n

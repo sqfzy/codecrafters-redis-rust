@@ -7,30 +7,38 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
 };
+use tracing::{debug, field::debug};
 
-#[async_trait::async_trait]
 pub trait FrameHandler {
     async fn read_frame(&mut self) -> RedisResult<Frame>;
     async fn write_frame(&mut self, frame: Frame) -> RedisResult<()>;
 }
 
-#[async_trait::async_trait]
 impl FrameHandler for TcpStream {
     async fn read_frame(&mut self) -> RedisResult<Frame> {
-        let len = get_len(self, b'*').await? as usize;
-        if len == 0 {
-            return Err(RedisError::EndofStream);
-        }
-        let mut frames: Vec<Frame> = Vec::with_capacity(len);
-
-        for _ in 0..len {
-            let len = get_len(self, b'$').await? as usize;
-            let bytes = get_exact(self, len).await?;
-            let frame = Frame::Bulk(bytes);
-            frames.push(frame);
-        }
-
-        Ok(Frame::Array(frames))
+        // match self.read_u8().await? {
+        //     b'*' => {
+        //         debug!("reading array");
+        //
+        //         let len = get_len(self, b'*').await? as usize;
+        //         let mut frames: Vec<Frame> = Vec::with_capacity(len);
+        //
+        //         for _ in 0..len {
+        //             println!("debug1");
+        //             let frame = read_value(self).await?;
+        //             frames.push(frame);
+        //         }
+        //
+        //         debug!(?frames);
+        //
+        //         Ok(Frame::Array(frames))
+        //     }
+        //     prefix @ b'+' | prefix @ b'-' | prefix @ b':' | prefix @ b'$' => {
+        //         read_value(self, prefix).await
+        //     }
+        //     _ => Err(RedisError::SyntaxErr),
+        // }
+        todo!()
     }
 
     async fn write_frame(&mut self, frame: Frame) -> RedisResult<()> {
@@ -51,6 +59,38 @@ impl FrameHandler for TcpStream {
     }
 }
 
+async fn read_line(stream: &mut TcpStream) -> RedisResult<Bytes> {
+    // match stream.read_u8().await {
+    //     Ok(byte) => {
+    //         if byte != prefix {
+    //             return Err(RedisError::SyntaxErr);
+    //         }
+    //     }
+    //     Err(e) => {
+    //         if e.kind() == std::io::ErrorKind::UnexpectedEof {
+    //             return Ok(0);
+    //         }
+    //     }
+    // }
+    
+    let mut buf = vec![];
+    loop {
+        let byte = stream.read_u8().await?;
+        if byte == b'\r' {
+            let byte = stream.read_u8().await?;
+            if byte == b'\n' {
+                break;
+            }
+            buf.put_u8(b'\r');
+            buf.put_u8(byte);
+        }
+        buf.put_u8(byte);
+    }
+
+    // Ok(buf.into())
+    todo!()
+}
+
 async fn get_len(stream: &mut TcpStream, prefix: u8) -> RedisResult<u64> {
     match stream.read_u8().await {
         Ok(byte) => {
@@ -65,39 +105,18 @@ async fn get_len(stream: &mut TcpStream, prefix: u8) -> RedisResult<u64> {
         }
     }
 
-    // Vail command format:
-    // $12\r\n
-    // *12\r\n
-    // ...
-    // Invail command format:
-    // $12, $12\r, $12\n
-    let mut len_buf = vec![];
-    loop {
-        let mut byte = stream.read_u8().await?;
-        if byte != b'\r' {
-            len_buf.put_u8(byte);
-            continue;
-        }
+    let len = read_line(stream).await?;
+    let len = String::from_utf8(len.into())
+        .map_err(|_| RedisError::SyntaxErr)?
+        .parse::<u64>()
+        .map_err(|_| RedisError::SyntaxErr)?;
 
-        byte = stream.read_u8().await?;
-        if byte != b'\n' {
-            len_buf.put_u8(b'\r');
-            len_buf.put_u8(byte);
-            continue;
-        }
-
-        let len = String::from_utf8(len_buf)
-            .map_err(|_| RedisError::SyntaxErr)?
-            .parse::<u64>()
-            .map_err(|_| RedisError::SyntaxErr)?;
-
-        // not allow 0 length
-        if len == 0 {
-            return Err(RedisError::SyntaxErr);
-        }
-
-        return Ok(len);
+    // not allow 0 length
+    if len == 0 {
+        return Err(RedisError::SyntaxErr);
     }
+
+    return Ok(len);
 }
 
 async fn get_exact(stream: &mut TcpStream, n: usize) -> RedisResult<Bytes> {
@@ -150,4 +169,92 @@ async fn write_value(stream: &mut TcpStream, frame: Frame) -> RedisResult<()> {
     }
 
     Ok(())
+}
+
+// async fn read_value(stream: &mut TcpStream) -> RedisResult<Frame> {
+//     match stream.read_u8().await? {
+//         b'+' => read_value(stream, b'+').await,
+//         b'-' => read_value(stream, b'-').await,
+//         b':' => read_value(stream, b':').await,
+//         b'$' => read_value(stream, b'$').await,
+//         b'*' => read_value(stream, b'*').await,
+//         _ => Err(RedisError::SyntaxErr),
+//     }
+// }
+
+async fn read_value(stream: &mut TcpStream, prefix: u8) -> RedisResult<Frame> {
+    match prefix {
+        b'+' => {
+            debug!("reading simple");
+
+            let mut buf = vec![];
+            loop {
+                let byte = stream.read_u8().await?;
+                if byte == b'\r' {
+                    let byte = stream.read_u8().await?;
+                    if byte == b'\n' {
+                        break;
+                    }
+                }
+                buf.push(byte);
+            }
+            let res = Frame::Simple(String::from_utf8(buf).map_err(|_| RedisError::SyntaxErr)?);
+
+            debug!(?res);
+
+            Ok(res)
+        }
+        b'-' => {
+            let mut buf = vec![];
+            loop {
+                let byte = stream.read_u8().await?;
+                if byte == b'\r' {
+                    let byte = stream.read_u8().await?;
+                    if byte == b'\n' {
+                        break;
+                    }
+                }
+                buf.push(byte);
+            }
+            let res = Frame::Error(String::from_utf8(buf).map_err(|_| RedisError::SyntaxErr)?);
+
+            debug!(?res);
+
+            Ok(res)
+        }
+        b':' => {
+            let mut buf = vec![];
+            loop {
+                let byte = stream.read_u8().await?;
+                if byte == b'\r' {
+                    let byte = stream.read_u8().await?;
+                    if byte == b'\n' {
+                        break;
+                    }
+                }
+                buf.push(byte);
+            }
+            let res = Frame::Integer(
+                String::from_utf8(buf)
+                    .map_err(|_| RedisError::SyntaxErr)?
+                    .parse::<u64>()
+                    .map_err(|_| RedisError::SyntaxErr)?,
+            );
+
+            debug!(?res);
+
+            Ok(res)
+        }
+        b'$' => {
+            let len = get_len(stream, b'$').await? as usize;
+            let bytes = get_exact(stream, len).await?;
+            let res = Frame::Bulk(bytes);
+
+            debug!(?res);
+
+            Ok(res)
+        }
+        b'*' => unreachable!(),
+        _ => Err(RedisError::SyntaxErr),
+    }
 }

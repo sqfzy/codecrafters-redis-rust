@@ -1,13 +1,15 @@
-use std::time::Duration;
-
 use crate::{
     cmd::{self, CmdExecutor, Section},
     error::{RedisError, RedisResult},
 };
-use bytes::Bytes;
-use tracing::{debug, info};
+use bytes::{Buf, Bytes, BytesMut};
+use std::{io::Read, time::Duration, usize};
+use tokio_util::codec::{AnyDelimiterCodec, Decoder, Encoder, LinesCodec};
+use tracing::debug;
 
-#[derive(Clone, Debug, Default)]
+pub struct FrameCodec;
+
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum Frame {
     Simple(String), // +<str>\r\n
     Error(String),  // -<err>\r\n
@@ -16,6 +18,90 @@ pub enum Frame {
     #[default]
     Null, // $-1\r\n
     Array(Vec<Frame>), // *<len>\r\n<Frame>...
+}
+
+impl Decoder for FrameCodec {
+    type Item = Frame;
+    type Error = RedisError;
+
+    fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        match src[0] {
+            b'*' => {
+                let len = read_line(src)?;
+                let len = String::from_utf8(len.into())
+                    .map_err(|_| RedisError::SyntaxErr)?
+                    .parse::<u64>()
+                    .map_err(|_| RedisError::SyntaxErr)?;
+
+                let mut frames = Vec::with_capacity(len as usize);
+                for _ in 0..len {
+                    let frame = read_value(src)?;
+                    frames.push(frame);
+                }
+
+                Ok(Some(Frame::Array(frames)))
+            }
+            b'+' | b'-' | b':' | b'$' => Ok(Some(read_value(src)?)),
+            _ => Err(RedisError::SyntaxErr),
+        }
+    }
+}
+
+fn read_line(src: &mut BytesMut) -> RedisResult<Option<Bytes>> {
+    let mut pos = None;
+    for i in 0..src.len() {
+        if Some("\r\n".as_ref()) == src.get(i..=i + 1) {
+            pos = Some(i);
+            break;
+        }
+    }
+
+    let mut line = src.split_to(pos as usize + 1);
+    // remove the last \r\n
+    line.truncate(line.len() - 2);
+
+    Ok(line.freeze())
+}
+
+fn read_value(src: &mut BytesMut) -> RedisResult<Frame> {
+    match src.get_u8() {
+        b'+' => {
+            let line = read_line(src)?;
+            let msg = String::from_utf8(line.to_vec()).map_err(|_| RedisError::SyntaxErr)?;
+            Ok(Frame::Simple(msg))
+        }
+        b'-' => {
+            let line = read_line(src)?;
+            let msg = String::from_utf8(line.to_vec()).map_err(|_| RedisError::SyntaxErr)?;
+            Ok(Frame::Error(msg))
+        }
+        b':' => {
+            let line = read_line(src)?;
+            let num = String::from_utf8(line.to_vec())
+                .map_err(|_| RedisError::SyntaxErr)?
+                .parse::<u64>()
+                .map_err(|_| RedisError::SyntaxErr)?;
+            Ok(Frame::Integer(num))
+        }
+        b'$' => {
+            let len = read_line(src)?;
+            let len = String::from_utf8(len.into())
+                .map_err(|_| RedisError::SyntaxErr)?
+                .parse::<u64>()
+                .map_err(|_| RedisError::SyntaxErr)? as usize;
+
+            // // not allow 0 length
+            // if len == 0 {
+            //     return Err(RedisError::SyntaxErr);
+            // }
+
+            let mut buf = BytesMut::with_capacity(len);
+            src.reader().read_exact(&mut buf).unwrap();
+            Ok(Frame::Bulk(buf.freeze()))
+        }
+        b'*' => unreachable!(),
+        _ => Err(RedisError::SyntaxErr),
+    }
 }
 
 impl TryInto<Vec<Bytes>> for Frame {
@@ -33,6 +119,12 @@ impl TryInto<Vec<Bytes>> for Frame {
         } else {
             Err(RedisError::SyntaxErr)
         }
+    }
+}
+
+impl From<Vec<Bytes>> for Frame {
+    fn from(value: Vec<Bytes>) -> Self {
+        Frame::Array(value.into_iter().map(|b| Frame::Bulk(b)).collect())
     }
 }
 

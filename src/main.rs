@@ -14,13 +14,14 @@ use crate::{
     frame::Frame,
     stream::FrameHandler,
 };
+use config::RedisConfig;
 use once_cell::sync::Lazy;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
 };
 
-static CONFIG: Lazy<Arc<config::RedisConfig>> = Lazy::new(|| Arc::new(config::RedisConfig::new()));
+static CONFIG: Lazy<Arc<config::RedisConfig>> = Lazy::new(|| Arc::new(RedisConfig::new()));
 
 fn init() {
     if std::env::var("RUST_LOG").is_err() {
@@ -34,6 +35,9 @@ async fn main() {
     // client_test("*2\r\n$4\r\ninfo\r\n$11\r\nreplication\r\n").await;
     // return;
     init();
+
+    let config = CONFIG.clone();
+    config.may_replicaof().await.unwrap();
 
     let listener = TcpListener::bind(format!("localhost:{}", CONFIG.port))
         .await
