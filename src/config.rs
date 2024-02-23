@@ -2,7 +2,7 @@ use crate::{cli::Cli, error::RedisResult, frame::Frame, stream::FrameHandler};
 use bytes::Bytes;
 use clap::Parser;
 use rand::Rng;
-use tokio::net::TcpStream;
+use tokio::{io::AsyncWriteExt, net::TcpStream};
 
 #[derive(Debug, Default)]
 pub struct RedisConfig {
@@ -34,18 +34,15 @@ impl RedisConfig {
         if let Some(repl) = self.replicaof.as_ref() {
             let mut to_master = TcpStream::connect(repl).await?;
 
-            println!("debug1");
             // send {PING}
             to_master
                 .write_frame(Frame::Array(vec![Frame::Bulk(Bytes::from_static(b"PING"))]))
                 .await?;
             // recv {PONG}
-            // if to_master.read_frame().await? != Frame::Simple("PONG".to_string()) {
-            //     panic!("Master server responds invaildly");
-            // }
-            println!("{:?}", to_master.read_frame().await.unwrap());
+            if to_master.read_frame().await? != Some(Frame::Simple("PONG".to_string())) {
+                panic!("Master server responds invaildly");
+            }
 
-            println!("debug2");
             // send {REPLCONF listening-port <PORT>}
             to_master
                 .write_frame(
@@ -58,36 +55,33 @@ impl RedisConfig {
                 )
                 .await?;
             // recv {OK}
-            if to_master.read_frame().await? != Frame::Simple("OK".to_string()) {
+            if to_master.read_frame().await? != Some(Frame::Simple("OK".to_string())) {
                 panic!("Master server responds invaildly");
             }
 
-            println!("debug3");
             // send {REPLCONF capa psync2}
             to_master
                 .write_frame(vec!["REPLCONF".into(), "capa".into(), "psync2".into()].into())
                 .await?;
             // recv {OK}
-            if to_master.read_frame().await? != Frame::Simple("OK".to_string()) {
+            if to_master.read_frame().await? != Some(Frame::Simple("OK".to_string())) {
                 panic!("Master server responds invaildly");
             }
 
-            println!("debug4");
             // send {PSYNC ? -1}
             to_master
                 .write_frame(vec!["PSYNC".into(), "?".into(), "-1".into()].into())
                 .await?;
             // recv {FULLRESYNC <REPL_ID> 0}
-            if to_master.read_frame().await? != Frame::Simple("OK".to_string()) {
-                panic!("Master server responds invaildly");
-            }
-            if let Frame::Simple(s) = to_master.read_frame().await? {
+            if let Some(Frame::Simple(s)) = to_master.read_frame().await? {
                 tracing::info!(
                     "Successfully replicaof {}, repl_id is {}",
                     self.replicaof.as_ref().expect("Replicaof should be exist"),
                     s
                 );
             }
+
+            to_master.shutdown().await?;
         }
         Ok(())
     }

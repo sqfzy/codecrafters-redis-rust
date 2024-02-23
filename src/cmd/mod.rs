@@ -4,6 +4,7 @@ mod replication;
 use crate::{db::DbManipulate, error::RedisResult, Frame};
 use async_trait::async_trait;
 pub use command::*;
+pub use replication::*;
 
 #[async_trait]
 pub trait CmdExecutor: Send {

@@ -6,7 +6,7 @@ mod error;
 mod frame;
 mod stream;
 
-use std::sync::Arc;
+use std::{str::FromStr, sync::Arc};
 
 use crate::{
     db::Db,
@@ -20,6 +20,7 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
 };
+use tracing::Level;
 
 static CONFIG: Lazy<Arc<config::RedisConfig>> = Lazy::new(|| Arc::new(RedisConfig::new()));
 
@@ -27,7 +28,12 @@ fn init() {
     if std::env::var("RUST_LOG").is_err() {
         std::env::set_var("RUST_LOG", "debug");
     }
-    tracing_subscriber::fmt::init();
+
+    let level = Level::from_str(&std::env::var("RUST_LOG").unwrap()).unwrap();
+    tracing_subscriber::fmt()
+        // .pretty()
+        .with_max_level(level)
+        .init();
 }
 
 #[tokio::main]
@@ -73,10 +79,11 @@ async fn handle(mut stream: TcpStream, mut db: Db) -> RedisResult<()> {
     // return Ok(());
 
     loop {
-        let frames = stream.read_frame().await?;
-        let mut cmd = frames.parse_cmd()?;
-        let res = (*cmd).execute(&mut db).await?;
-        stream.write_frame(res).await?;
+        if let Some(frame) = stream.read_frame().await? {
+            let mut cmd = frame.parse_cmd()?;
+            let res = (*cmd).execute(&mut db).await?;
+            stream.write_frame(res).await?;
+        }
     }
 }
 
