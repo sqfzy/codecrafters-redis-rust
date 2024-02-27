@@ -5,15 +5,11 @@ mod db;
 mod error;
 mod frame;
 mod stream;
+mod util;
 
 use std::{str::FromStr, sync::Arc};
 
-use crate::{
-    db::Db,
-    error::{RedisError, RedisResult},
-    frame::Frame,
-    stream::FrameHandler,
-};
+use crate::{db::Db, error::RedisResult, frame::Frame, stream::FrameHandler};
 use config::RedisConfig;
 use once_cell::sync::Lazy;
 use tokio::{
@@ -58,12 +54,7 @@ async fn main() {
                 let db = db.clone();
                 tokio::spawn(async move {
                     if let Err(e) = handle(stream, db).await {
-                        match e {
-                            RedisError::EndofStream => {}
-                            _ => {
-                                println!("error: {}", e);
-                            }
-                        }
+                        println!("error: {}", e);
                     }
                 });
             }
@@ -80,13 +71,14 @@ async fn handle(mut stream: TcpStream, mut db: Db) -> RedisResult<()> {
 
     loop {
         if let Some(frame) = stream.read_frame().await? {
-            let mut cmd = frame.parse_cmd()?;
-            let res = (*cmd).execute(&mut db).await?;
+            let cmd = frame.parse_cmd()?;
+            let res = cmd.execute(&mut db).await?;
             stream.write_frame(res).await?;
         }
     }
 }
 
+#[allow(dead_code)]
 async fn client_test(cmd: &'static str) {
     let mut stream = TcpStream::connect("127.0.0.1:6379").await.unwrap();
     stream.write_all(cmd.as_bytes()).await.unwrap();
@@ -95,6 +87,7 @@ async fn client_test(cmd: &'static str) {
     println!("{:?}", String::from_utf8(buf[0..n].to_vec()).unwrap());
 }
 
+#[allow(dead_code)]
 async fn server_test(stream: &mut TcpStream) {
     let mut buf = [0u8; 1024];
     let n = stream.read(&mut buf).await.unwrap();

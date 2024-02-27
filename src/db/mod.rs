@@ -6,8 +6,6 @@ use tokio::sync::Mutex;
 
 pub use string_db::StringDb;
 
-// async fn check(&self, key: Bytes)
-
 #[derive(Debug, Clone)]
 pub struct Db {
     pub inner: Arc<Mutex<DbInner>>,
@@ -18,9 +16,13 @@ pub struct DbInner {
     pub string_db: Box<dyn StringDbManipulator>,
 }
 
+#[async_trait::async_trait]
 pub trait StringDbManipulator: Send + std::fmt::Debug {
-    async fn get(&self, key: &str) -> Option<Bytes>;
-    async fn set(&mut self, key: String, value: Bytes, expire: Option<Duration>, keepttl: bool);
+    async fn get(&mut self, key: &str) -> Option<Bytes>;
+    async fn set(&mut self, key: String, value: Bytes, expire: Option<Duration>);
+    async fn del(&mut self, key: &str);
+    async fn check_exist(&mut self, key: &str) -> bool;
+    async fn get_ttl(&mut self, key: &str) -> Option<Duration>;
 }
 
 impl Db {

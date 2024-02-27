@@ -1,6 +1,6 @@
 use super::CmdExecutor;
 use crate::{
-    db::{Db, StringDbManipulator},
+    db::Db,
     error::{RedisError, RedisResult},
     Frame, CONFIG,
 };
@@ -10,8 +10,9 @@ use std::time::Duration;
 // *2\r\n$7\r\nCOMMAND\r\n$4\r\nDOCS\r\n
 pub struct Command;
 
+#[async_trait::async_trait]
 impl CmdExecutor for Command {
-    async fn execute(self, _db: Db) -> RedisResult<Frame> {
+    async fn execute(self: Box<Self>, _db: &mut Db) -> RedisResult<Frame> {
         Ok(Frame::Array(vec![]))
     }
 }
@@ -20,8 +21,9 @@ impl CmdExecutor for Command {
 // return: +PONG\r\n
 pub struct Ping;
 
+#[async_trait::async_trait]
 impl CmdExecutor for Ping {
-    async fn execute(self, _db: Db) -> RedisResult<Frame> {
+    async fn execute(self: Box<Self>, _db: &mut Db) -> RedisResult<Frame> {
         Ok(Frame::Simple("PONG".to_string()))
     }
 }
@@ -32,8 +34,9 @@ pub struct Echo {
     pub msg: Bytes,
 }
 
+#[async_trait::async_trait]
 impl CmdExecutor for Echo {
-    async fn execute(self, _db: Db) -> RedisResult<Frame> {
+    async fn execute(self: Box<Self>, _db: &mut Db) -> RedisResult<Frame> {
         Ok(Frame::Bulk(self.msg.clone()))
     }
 }
@@ -46,8 +49,9 @@ pub struct Get {
     pub key: String,
 }
 
+#[async_trait::async_trait]
 impl CmdExecutor for Get {
-    async fn execute(self, db: Db) -> RedisResult<Frame> {
+    async fn execute(self: Box<Self>, db: &mut Db) -> RedisResult<Frame> {
         Ok(
             match db.inner.lock().await.string_db.get(self.key.as_ref()).await {
                 Some(value) => Frame::Bulk(value),
@@ -64,13 +68,14 @@ pub struct Set {
     pub keep_ttl: bool,
 }
 
+#[async_trait::async_trait]
 impl CmdExecutor for Set {
-    async fn execute(self, mut db: Db) -> RedisResult<Frame> {
+    async fn execute(self: Box<Self>, db: &mut Db) -> RedisResult<Frame> {
         db.inner
             .lock()
             .await
             .string_db
-            .set(self.key, self.value.clone(), self.expire, self.keep_ttl)
+            .set(self.key, self.value.clone(), self.expire)
             .await;
         Ok(Frame::Simple("OK".to_string()))
     }
@@ -80,6 +85,7 @@ pub struct Info {
     pub sections: Section,
 }
 
+#[allow(dead_code)]
 pub enum Section {
     Array(Vec<Section>),
     // all: Return all sections (excluding module generated ones)
@@ -125,7 +131,7 @@ impl TryFrom<Bytes> for Section {
         match value.as_slice() {
             b"replication" => Ok(Section::Replication),
             // TODO:
-            _ => Err(RedisError::SyntaxErr),
+            _ => Err(RedisError::incomplete_err()),
         }
     }
 }
@@ -141,8 +147,9 @@ impl TryFrom<Vec<Bytes>> for Section {
     }
 }
 
+#[async_trait::async_trait]
 impl CmdExecutor for Info {
-    async fn execute(self, db: Db) -> RedisResult<Frame> {
+    async fn execute(self: Box<Self>, _db: &mut Db) -> RedisResult<Frame> {
         match self.sections {
             Section::Replication => {
                 let res = if CONFIG.replicaof.is_none() {
@@ -159,7 +166,7 @@ impl CmdExecutor for Info {
                 Ok(Frame::Bulk(res.into()))
             }
             // TODO:
-            _ => Err(RedisError::InComplete),
+            _ => Err(RedisError::incomplete_err()),
         }
     }
 }

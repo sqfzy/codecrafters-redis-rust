@@ -1,9 +1,10 @@
 use crate::{
     cmd::{self, CmdExecutor, Section},
     error::{RedisError, RedisResult},
+    util::{bytes_to_string, bytes_to_u64},
 };
-use bytes::{Buf, Bytes, BytesMut};
-use std::{io::Read, time::Duration, usize};
+use bytes::Bytes;
+use std::time::Duration;
 use tracing::debug;
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -26,11 +27,11 @@ impl TryInto<Vec<Bytes>> for Frame {
                 .into_iter()
                 .map(|frame| match frame {
                     Frame::Bulk(bytes) => Ok(bytes),
-                    _ => Err(RedisError::SyntaxErr),
+                    _ => panic!("invaild frame"),
                 })
                 .collect()
         } else {
-            Err(RedisError::SyntaxErr)
+            panic!("invaild frame");
         }
     }
 }
@@ -69,7 +70,7 @@ impl Frame {
 
                 if len == 2 {
                     return Ok(Box::new(cmd::Get {
-                        key: bulks[1].clone(),
+                        key: bytes_to_string(bulks[1].clone())?,
                     }));
                 }
             }
@@ -80,7 +81,7 @@ impl Frame {
             _ => {}
         }
 
-        Err(RedisError::SyntaxErr)
+        Err(RedisError::syntax_err("unknown command"))
     }
 }
 
@@ -91,7 +92,7 @@ impl TryFrom<Vec<Bytes>> for cmd::Set {
 
         let len = bulks.len();
         if len >= 3 {
-            let key = bulks[1].clone();
+            let key = bytes_to_string(bulks[1].clone())?;
             let value = bulks[2].clone();
 
             if len == 3 {
@@ -117,13 +118,12 @@ impl TryFrom<Vec<Bytes>> for cmd::Set {
             }
             if len == 5 {
                 let expire_unit = bulks[3].to_ascii_lowercase();
-                let expire = String::from_utf8(bulks[4].to_vec())
-                    .map_err(|_| RedisError::SyntaxErr)?
-                    .parse::<u64>()
-                    .map_err(|_| RedisError::SyntaxErr)?;
+                let expire = bytes_to_u64(bulks[4].clone())?;
 
                 if expire == 0 {
-                    return Err(RedisError::SyntaxErr);
+                    return Err(RedisError::syntax_err(
+                        "expire time should be greater than 0",
+                    ));
                 }
 
                 match expire_unit.as_slice() {
@@ -148,7 +148,7 @@ impl TryFrom<Vec<Bytes>> for cmd::Set {
             }
         }
 
-        Err(RedisError::SyntaxErr)
+        Err(RedisError::syntax_err("invaild arguments"))
     }
 }
 
@@ -176,6 +176,6 @@ impl TryFrom<Vec<Bytes>> for cmd::Info {
             });
         }
 
-        Err(RedisError::SyntaxErr)
+        Err(RedisError::syntax_err("invaild arguments"))
     }
 }

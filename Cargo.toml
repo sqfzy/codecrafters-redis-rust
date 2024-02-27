@@ -19,8 +19,8 @@ edition = "2021"
 #
 # DON'T EDIT THIS!
 [dependencies]
-anyhow = "1.0.59" # error handling
-# async-trait = "0.1.77"
+anyhow = "1.0.59"                                   # error handling
+async-trait = "0.1.77"
 bytes = "1.5"                                       # helps manage buffers
 clap = { version = "4.5.1", features = ["derive"] }
 config = "0.14.0"

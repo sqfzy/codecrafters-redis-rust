@@ -3,6 +3,7 @@ use std::usize;
 use crate::{
     error::{RedisError, RedisResult},
     frame::Frame,
+    util::{bytes_to_string, bytes_to_u64},
 };
 use bytes::{BufMut, Bytes};
 use tokio::{
@@ -81,10 +82,7 @@ async fn read_line(stream: &mut TcpStream) -> RedisResult<Bytes> {
 
 async fn read_decimal(stream: &mut TcpStream) -> RedisResult<u64> {
     let len = read_line(stream).await?;
-    String::from_utf8(len.into())
-        .map_err(|_| RedisError::SyntaxErr)?
-        .parse::<u64>()
-        .map_err(|_| RedisError::SyntaxErr)
+    bytes_to_u64(len)
 }
 
 async fn read_exact(stream: &mut TcpStream, n: usize) -> RedisResult<Bytes> {
@@ -94,7 +92,7 @@ async fn read_exact(stream: &mut TcpStream, n: usize) -> RedisResult<Bytes> {
     let mut new_line = [0u8; 2];
     stream.read_exact(&mut new_line).await?;
     if new_line != "\r\n".as_bytes() {
-        return Err(RedisError::SyntaxErr);
+        return Err(RedisError::syntax_err("invaild cmd format"));
     }
 
     Ok(buf.into())
@@ -106,8 +104,7 @@ async fn read_value(stream: &mut TcpStream) -> RedisResult<Frame> {
             debug!("reading simple");
 
             let line = read_line(stream).await?;
-            let res =
-                Frame::Simple(String::from_utf8(line.into()).map_err(|_| RedisError::SyntaxErr)?);
+            let res = Frame::Simple(bytes_to_string(line)?);
 
             debug!(?res);
 
@@ -117,8 +114,7 @@ async fn read_value(stream: &mut TcpStream) -> RedisResult<Frame> {
             debug!("reading error");
 
             let line = read_line(stream).await?;
-            let res =
-                Frame::Error(String::from_utf8(line.into()).map_err(|_| RedisError::SyntaxErr)?);
+            let res = Frame::Error(bytes_to_string(line)?);
 
             debug!(?res);
 
@@ -147,7 +143,7 @@ async fn read_value(stream: &mut TcpStream) -> RedisResult<Frame> {
         b'*' => unreachable!(),
         somthing => {
             error!("read invaild prefix {}", somthing);
-            Err(RedisError::SyntaxErr)
+            Err(RedisError::syntax_err("invaild cmd format"))
         }
     }
 }
