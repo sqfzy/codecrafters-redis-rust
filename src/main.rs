@@ -49,7 +49,7 @@ async fn main() {
         .await
         .expect("Fail to connect");
 
-    let db = Db::new();
+    let db = Db::new(Box::new(db::StringDb::new()));
 
     loop {
         match listener.accept().await {

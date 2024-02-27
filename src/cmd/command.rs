@@ -1,19 +1,27 @@
 use super::CmdExecutor;
 use crate::{
-    db::DbManipulate,
+    db::{Db, StringDbManipulator},
     error::{RedisError, RedisResult},
     Frame, CONFIG,
 };
-use async_trait::async_trait;
 use bytes::Bytes;
 use std::time::Duration;
+
+// *2\r\n$7\r\nCOMMAND\r\n$4\r\nDOCS\r\n
+pub struct Command;
+
+impl CmdExecutor for Command {
+    async fn execute(self, _db: Db) -> RedisResult<Frame> {
+        Ok(Frame::Array(vec![]))
+    }
+}
 
 // *1\r\n$4\r\nping\r\n
 // return: +PONG\r\n
 pub struct Ping;
-#[async_trait]
+
 impl CmdExecutor for Ping {
-    async fn execute(&mut self, _db: &mut dyn DbManipulate) -> RedisResult<Frame> {
+    async fn execute(self, _db: Db) -> RedisResult<Frame> {
         Ok(Frame::Simple("PONG".to_string()))
     }
 }
@@ -23,9 +31,9 @@ impl CmdExecutor for Ping {
 pub struct Echo {
     pub msg: Bytes,
 }
-#[async_trait]
+
 impl CmdExecutor for Echo {
-    async fn execute(&mut self, _db: &mut dyn DbManipulate) -> RedisResult<Frame> {
+    async fn execute(self, _db: Db) -> RedisResult<Frame> {
         Ok(Frame::Bulk(self.msg.clone()))
     }
 }
@@ -35,34 +43,35 @@ impl CmdExecutor for Echo {
 // return(the key exesits): $5\r\nvalue\r\n
 // return(the key doesn't exesit): $-1\r\n
 pub struct Get {
-    pub key: Bytes,
+    pub key: String,
 }
-#[async_trait]
+
 impl CmdExecutor for Get {
-    async fn execute(&mut self, db: &mut dyn DbManipulate) -> RedisResult<Frame> {
-        Ok(match db.get(self.key.clone()).await {
-            Some(value) => Frame::Bulk(value),
-            None => Frame::Null,
-        })
+    async fn execute(self, db: Db) -> RedisResult<Frame> {
+        Ok(
+            match db.inner.lock().await.string_db.get(self.key.as_ref()).await {
+                Some(value) => Frame::Bulk(value),
+                None => Frame::Null,
+            },
+        )
     }
 }
 
 pub struct Set {
-    pub key: Bytes,
+    pub key: String,
     pub value: Bytes,
     pub expire: Option<Duration>,
     pub keep_ttl: bool,
 }
-#[async_trait]
+
 impl CmdExecutor for Set {
-    async fn execute(&mut self, db: &mut dyn DbManipulate) -> RedisResult<Frame> {
-        db.set(
-            self.key.clone(),
-            self.value.clone(),
-            self.expire,
-            self.keep_ttl,
-        )
-        .await;
+    async fn execute(self, mut db: Db) -> RedisResult<Frame> {
+        db.inner
+            .lock()
+            .await
+            .string_db
+            .set(self.key, self.value.clone(), self.expire, self.keep_ttl)
+            .await;
         Ok(Frame::Simple("OK".to_string()))
     }
 }
@@ -132,9 +141,8 @@ impl TryFrom<Vec<Bytes>> for Section {
     }
 }
 
-#[async_trait]
 impl CmdExecutor for Info {
-    async fn execute(&mut self, db: &mut dyn DbManipulate) -> RedisResult<Frame> {
+    async fn execute(self, db: Db) -> RedisResult<Frame> {
         match self.sections {
             Section::Replication => {
                 let res = if CONFIG.replicaof.is_none() {

@@ -643,7 +643,6 @@ name = "redis-starter-rust"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "async-trait",
  "bytes",
  "clap",
  "config",
