@@ -649,7 +649,6 @@ dependencies = [
  "config",
  "once_cell",
  "rand",
- "thiserror",
  "tokio",
  "tracing",
  "tracing-subscriber",

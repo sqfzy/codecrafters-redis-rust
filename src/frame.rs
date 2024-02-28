@@ -1,8 +1,8 @@
 use crate::{
     cmd::{self, CmdExecutor, Section},
-    error::{RedisError, RedisResult},
     util::{bytes_to_string, bytes_to_u64},
 };
+use anyhow::{anyhow, bail, Error, Result};
 use bytes::Bytes;
 use std::time::Duration;
 use tracing::debug;
@@ -19,9 +19,9 @@ pub enum Frame {
 }
 
 impl TryInto<Vec<Bytes>> for Frame {
-    type Error = RedisError;
+    type Error = Error;
 
-    fn try_into(self) -> Result<Vec<Bytes>, RedisError> {
+    fn try_into(self) -> Result<Vec<Bytes>, Error> {
         if let Frame::Array(frames) = self {
             frames
                 .into_iter()
@@ -43,53 +43,50 @@ impl From<Vec<Bytes>> for Frame {
 }
 
 impl Frame {
-    pub fn parse_cmd(self) -> RedisResult<Box<dyn CmdExecutor>> {
+    pub fn parse_cmd(self) -> Result<Box<dyn CmdExecutor>> {
         let bulks: Vec<Bytes> = self.try_into()?;
         let len = bulks.len();
-        let cmd_name = bulks[0].to_ascii_lowercase();
-        match cmd_name.as_slice() {
-            b"command" => return Ok(Box::new(cmd::Command)),
-            b"ping" => {
-                debug!("parsing to Ping");
-
+        let cmd_name = bytes_to_string(bulks[0].clone())?;
+        match cmd_name.to_lowercase().as_str() {
+            "command" => return Ok(Box::new(cmd::Command)),
+            "ping" => {
                 if len == 1 {
                     return Ok(Box::new(cmd::Ping));
                 }
             }
-            b"echo" => {
-                debug!("parsing to Echo");
-
+            "echo" => {
                 if len == 2 {
                     return Ok(Box::new(cmd::Echo {
                         msg: bulks[1].clone(),
                     }));
                 }
             }
-            b"get" => {
-                debug!("parsing to Get");
-
+            "get" => {
                 if len == 2 {
                     return Ok(Box::new(cmd::Get {
                         key: bytes_to_string(bulks[1].clone())?,
                     }));
                 }
+                bail!("ERR wrong number of arguments for 'get' command")
             }
-            b"set" => return Ok(Box::new(cmd::Set::try_from(bulks)?) as Box<dyn CmdExecutor>),
-            b"info" => return Ok(Box::new(cmd::Info::try_from(bulks)?) as Box<dyn CmdExecutor>),
-            b"replconf" => return Ok(Box::new(cmd::Replconf)),
-            b"psync" => return Ok(Box::new(cmd::Psync)),
+            "set" => return Ok(Box::new(cmd::Set::try_from(bulks)?) as Box<dyn CmdExecutor>),
+            "info" => return Ok(Box::new(cmd::Info::try_from(bulks)?) as Box<dyn CmdExecutor>),
+            "replconf" => return Ok(Box::new(cmd::Replconf)),
+            "psync" => return Ok(Box::new(cmd::Psync)),
             _ => {}
         }
 
-        Err(RedisError::syntax_err("unknown command"))
+        Err(anyhow!(
+            // "ERR unknown command {}, with args beginning with:",
+            "ERR unknown command {}",
+            cmd_name
+        ))
     }
 }
 
 impl TryFrom<Vec<Bytes>> for cmd::Set {
-    type Error = RedisError;
+    type Error = Error;
     fn try_from(bulks: Vec<Bytes>) -> Result<Self, Self::Error> {
-        debug!("parsing to Set");
-
         let len = bulks.len();
         if len >= 3 {
             let key = bytes_to_string(bulks[1].clone())?;
@@ -121,9 +118,7 @@ impl TryFrom<Vec<Bytes>> for cmd::Set {
                 let expire = bytes_to_u64(bulks[4].clone())?;
 
                 if expire == 0 {
-                    return Err(RedisError::syntax_err(
-                        "expire time should be greater than 0",
-                    ));
+                    bail!("ERR invalid expire time in 'set' command")
                 }
 
                 match expire_unit.as_slice() {
@@ -148,15 +143,13 @@ impl TryFrom<Vec<Bytes>> for cmd::Set {
             }
         }
 
-        Err(RedisError::syntax_err("invaild arguments"))
+        Err(anyhow!("ERR syntax error"))
     }
 }
 
 impl TryFrom<Vec<Bytes>> for cmd::Info {
-    type Error = RedisError;
+    type Error = Error;
     fn try_from(value: Vec<Bytes>) -> Result<Self, Self::Error> {
-        debug!("parsing to Info");
-
         let len = value.len();
         if len == 1 {
             return Ok(cmd::Info {
@@ -176,6 +169,6 @@ impl TryFrom<Vec<Bytes>> for cmd::Info {
             });
         }
 
-        Err(RedisError::syntax_err("invaild arguments"))
+        Err(anyhow!("ERR syntax error"))
     }
 }

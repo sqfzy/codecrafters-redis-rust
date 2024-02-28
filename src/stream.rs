@@ -1,10 +1,10 @@
 use std::usize;
 
 use crate::{
-    error::{RedisError, RedisResult},
     frame::Frame,
     util::{bytes_to_string, bytes_to_u64},
 };
+use anyhow::{bail, Result};
 use bytes::{BufMut, Bytes};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -13,12 +13,12 @@ use tokio::{
 use tracing::{debug, error};
 
 pub trait FrameHandler {
-    async fn read_frame(&mut self) -> RedisResult<Option<Frame>>;
-    async fn write_frame(&mut self, frame: Frame) -> RedisResult<()>;
+    async fn read_frame(&mut self) -> Result<Option<Frame>>;
+    async fn write_frame(&mut self, frame: Frame) -> Result<()>;
 }
 
 impl FrameHandler for TcpStream {
-    async fn read_frame(&mut self) -> RedisResult<Option<Frame>> {
+    async fn read_frame(&mut self) -> Result<Option<Frame>> {
         let mut prefix = [0u8; 1];
         if self.peek(&mut prefix).await? == 0 {
             return Ok(None);
@@ -44,7 +44,7 @@ impl FrameHandler for TcpStream {
         }
     }
 
-    async fn write_frame(&mut self, frame: Frame) -> RedisResult<()> {
+    async fn write_frame(&mut self, frame: Frame) -> Result<()> {
         match frame {
             // *<len>\r\n<Frame>...
             Frame::Array(frames) => {
@@ -62,7 +62,7 @@ impl FrameHandler for TcpStream {
     }
 }
 
-async fn read_line(stream: &mut TcpStream) -> RedisResult<Bytes> {
+async fn read_line(stream: &mut TcpStream) -> Result<Bytes> {
     let mut buf = vec![];
     loop {
         let byte = stream.read_u8().await?;
@@ -80,25 +80,25 @@ async fn read_line(stream: &mut TcpStream) -> RedisResult<Bytes> {
     Ok(buf.into())
 }
 
-async fn read_decimal(stream: &mut TcpStream) -> RedisResult<u64> {
+async fn read_decimal(stream: &mut TcpStream) -> Result<u64> {
     let len = read_line(stream).await?;
     bytes_to_u64(len)
 }
 
-async fn read_exact(stream: &mut TcpStream, n: usize) -> RedisResult<Bytes> {
+async fn read_exact(stream: &mut TcpStream, n: usize) -> Result<Bytes> {
     let mut buf = vec![0u8; n];
     stream.read_exact(&mut buf).await?;
 
     let mut new_line = [0u8; 2];
     stream.read_exact(&mut new_line).await?;
     if new_line != "\r\n".as_bytes() {
-        return Err(RedisError::syntax_err("invaild cmd format"));
+        bail!("ERR syntax error")
     }
 
     Ok(buf.into())
 }
 
-async fn read_value(stream: &mut TcpStream) -> RedisResult<Frame> {
+async fn read_value(stream: &mut TcpStream) -> Result<Frame> {
     match stream.read_u8().await? {
         b'+' => {
             debug!("reading simple");
@@ -143,12 +143,12 @@ async fn read_value(stream: &mut TcpStream) -> RedisResult<Frame> {
         b'*' => unreachable!(),
         somthing => {
             error!("read invaild prefix {}", somthing);
-            Err(RedisError::syntax_err("invaild cmd format"))
+            bail!("ERR syntax error")
         }
     }
 }
 
-async fn write_value(stream: &mut TcpStream, frame: Frame) -> RedisResult<()> {
+async fn write_value(stream: &mut TcpStream, frame: Frame) -> Result<()> {
     match frame {
         // +<str>\r\n
         Frame::Simple(s) => {
@@ -158,13 +158,13 @@ async fn write_value(stream: &mut TcpStream, frame: Frame) -> RedisResult<()> {
         }
         // -<err>\r\n
         Frame::Error(e) => {
-            let msg = format!("+{}\r\n", e);
+            let msg = format!("-{}\r\n", e);
             stream.write_all(msg.as_bytes()).await?;
             stream.flush().await?;
         }
         // :<num>\r\n
         Frame::Integer(n) => {
-            let msg = format!("+{}\r\n", n);
+            let msg = format!(":{}\r\n", n);
             stream.write_all(msg.as_bytes()).await?;
             stream.flush().await?;
         }

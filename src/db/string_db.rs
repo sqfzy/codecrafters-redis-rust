@@ -97,3 +97,55 @@ impl super::StringDbManipulator for StringDb {
         None
     }
 }
+
+#[cfg(test)]
+mod string_db_test {
+    use super::*;
+    use crate::db::StringDbManipulator;
+    use tokio::time::sleep;
+
+    #[tokio::test]
+    async fn set_should_work() {
+        // test:
+        //  1. can set an element.
+        //  2. expire_at should work.
+
+        let mut db = StringDb::new();
+        assert_eq!(None, db.get("foo").await); // at first, without "foo" key
+
+        db.set("foo".into(), "bar".into(), None).await; // set "foo" "bar"
+        assert_eq!(Some("bar".into()), db.get("foo").await);
+
+        // set with 1 seconds life time
+        db.set("foo".into(), "bar".into(), Some(Duration::from_secs(1)))
+            .await;
+        sleep(Duration::from_secs(1)).await; // make it expire
+        assert_eq!(None, db.get("foo").await); // "foo" key has expired
+    }
+
+    #[tokio::test]
+    async fn del_should_work() {
+        let mut db = StringDb::new();
+        db.set("foo".into(), "bar".into(), None).await;
+        assert_eq!(Some("bar".into()), db.get("foo").await);
+        db.del("foo").await;
+        assert_eq!(None, db.get("foo").await);
+    }
+
+    #[tokio::test]
+    async fn check_exist_should_work() {
+        let mut db = StringDb::new();
+        db.set("foo".into(), "bar".into(), None).await;
+        assert!(db.check_exist("foo").await);
+    }
+
+    #[tokio::test]
+    async fn get_ttl_should_work() {
+        let mut db = StringDb::new();
+        db.set("foo".into(), "bar".into(), Some(Duration::from_secs(1)))
+            .await;
+        let ttl = db.get_ttl("foo").await;
+        assert!(ttl.is_some());
+        assert!(Duration::from_secs(1) - ttl.unwrap() < Duration::from_millis(100));
+    }
+}

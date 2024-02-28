@@ -1,4 +1,5 @@
-use crate::{cli::Cli, error::RedisResult, frame::Frame, stream::FrameHandler};
+use crate::{cli::Cli, frame::Frame, stream::FrameHandler};
+use anyhow::Result;
 use bytes::Bytes;
 use clap::Parser;
 use rand::Rng;
@@ -30,7 +31,7 @@ impl RedisConfig {
         }
     }
 
-    pub async fn may_replicaof(&self) -> RedisResult<()> {
+    pub async fn may_replicaof(&self) -> Result<()> {
         if let Some(repl) = self.replicaof.as_ref() {
             let mut to_master = TcpStream::connect(repl).await?;
 
